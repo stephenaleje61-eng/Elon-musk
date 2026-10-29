@@ -33,7 +33,7 @@ import {
 } from '../lib/firebase';
 import { ChatMessage, Conversation, AdminAuditLog } from '../types';
 
-const VISITOR_ID_KEY = 'elonverse_visitor_id';
+const VISITOR_ID_KEY = 'elonverse_visitorId';
 const VISITOR_NAME_KEY = 'elonverse_visitor_name';
 
 /**
@@ -42,14 +42,14 @@ const VISITOR_NAME_KEY = 'elonverse_visitor_name';
  */
 export function getOrCreateVisitorId(): string {
   try {
-    let id = localStorage.getItem(VISITOR_ID_KEY);
+    let id = localStorage.getItem(VISITOR_ID_KEY) || localStorage.getItem('elonverse_visitor_id');
     if (!id || id.trim().length === 0) {
-      id = 'visitor_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
-      localStorage.setItem(VISITOR_ID_KEY, id);
+      id = 'visitor_' + Math.random().toString(36).substring(2, 15);
     }
+    localStorage.setItem(VISITOR_ID_KEY, id);
     return id;
   } catch {
-    return 'visitor_' + Date.now().toString(36);
+    return 'visitor_' + Math.random().toString(36).substring(2, 15);
   }
 }
 

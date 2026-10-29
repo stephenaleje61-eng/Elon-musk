@@ -16,21 +16,13 @@ import {
   limit,
   onSnapshot,
   arrayUnion,
-  serverTimestamp,
 } from 'firebase/firestore';
-import {
-  signInAnonymously,
-  linkWithCredential,
-  EmailAuthProvider,
-  browserLocalPersistence,
-  setPersistence,
-} from 'firebase/auth';
 import {
   ref,
   uploadBytesResumable,
   getDownloadURL,
 } from 'firebase/storage';
-import { db, auth, storage } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
 import {
   UserProfile,
   LoungeMessage,
@@ -38,41 +30,29 @@ import {
   PrivateMessage,
 } from '../types';
 
-const LOCAL_GUEST_UID_KEY = 'elonverse_guest_uid';
-const LOCAL_GUEST_USERNAME_KEY = 'elonverse_guest_username';
+export const LOCAL_VISITOR_ID_KEY = 'elonverse_visitorId';
+export const LOCAL_GUEST_USERNAME_KEY = 'elonverse_guest_username';
 
 /**
- * Initialize anonymous Firebase Guest session with persistent local storage.
- * Free instant access: No email, no password, no phone, no payment.
+ * Generate visitorId locally:
+ * const visitorId = localStorage.getItem('elonverse_visitorId') || 'visitor_' + Math.random().toString(36).substring(2,15);
+ * localStorage.setItem('elonverse_visitorId', visitorId);
+ * No Firebase Auth needed!
+ */
+export function getOrCreateVisitorId(): string {
+  const visitorId =
+    localStorage.getItem(LOCAL_VISITOR_ID_KEY) ||
+    'visitor_' + Math.random().toString(36).substring(2, 15);
+  localStorage.setItem(LOCAL_VISITOR_ID_KEY, visitorId);
+  return visitorId;
+}
+
+/**
+ * Initialize instant guest session locally without Firebase Auth
  */
 export async function initAnonymousGuest(): Promise<{ uid: string; isNew: boolean }> {
-  try {
-    try {
-      await setPersistence(auth, browserLocalPersistence);
-    } catch {
-      // fallback
-    }
-
-    // 1. If auth is already initialized with a user, return it
-    if (auth.currentUser) {
-      localStorage.setItem(LOCAL_GUEST_UID_KEY, auth.currentUser.uid);
-      return { uid: auth.currentUser.uid, isNew: false };
-    }
-
-    // 2. Perform Anonymous Sign-In
-    const cred = await signInAnonymously(auth);
-    const uid = cred.user.uid;
-    localStorage.setItem(LOCAL_GUEST_UID_KEY, uid);
-    return { uid, isNew: true };
-  } catch (err: any) {
-    console.warn('Anonymous sign-in note:', err?.message || err);
-    if (err?.code === 'auth/admin-restricted-operation' || err?.code === 'auth/operation-not-allowed') {
-      throw new Error(
-        'Firebase Anonymous Authentication is currently disabled. Please enable "Anonymous" in Firebase Console > Authentication > Sign-in method.'
-      );
-    }
-    throw err;
-  }
+  const uid = getOrCreateVisitorId();
+  return { uid, isNew: false };
 }
 
 /**
@@ -92,14 +72,14 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 }
 
 /**
- * Validate and claim a unique username for a guest.
+ * Validate and claim a unique callsign for a visitor.
  * Enforces uniqueness via usernames/{usernameLower} collection.
  * Converts username to lowercase for uniqueness checks.
  * Validates format: 2-25 characters, letters, numbers, and underscores only.
  */
 export async function claimUsername(
   rawUsername: string,
-  _providedUid?: string
+  providedUid?: string
 ): Promise<{ success: boolean; error?: string; profile?: UserProfile }> {
   const username = rawUsername.trim();
   const usernameRegex = /^[a-zA-Z0-9_]{2,25}$/;
@@ -112,36 +92,10 @@ export async function claimUsername(
   }
 
   const usernameLower = username.toLowerCase();
-
-  // 1. Ensure Firebase Auth is active
-  let currentUser = auth.currentUser;
-  if (!currentUser) {
-    try {
-      const cred = await signInAnonymously(auth);
-      currentUser = cred.user;
-    } catch (authErr: any) {
-      if (
-        authErr?.code === 'auth/admin-restricted-operation' ||
-        authErr?.code === 'auth/operation-not-allowed'
-      ) {
-        return {
-          success: false,
-          error:
-            'Firebase Anonymous Authentication must be enabled. Please enable "Anonymous" in Firebase Console > Authentication > Sign-in method.',
-        };
-      }
-      return {
-        success: false,
-        error: `Authentication failed: ${authErr?.message || authErr}`,
-      };
-    }
-  }
-
-  // Use the verified authenticated UID (guaranteed to match request.auth.uid)
-  const uid = currentUser.uid;
+  const uid = providedUid || getOrCreateVisitorId();
 
   try {
-    // 2. Check if username is already claimed (lowercase uniqueness check)
+    // Check if username is already claimed (lowercase uniqueness check)
     const usernameDocRef = doc(db, 'usernames', usernameLower);
     const existingSnap = await getDoc(usernameDocRef);
 
@@ -157,21 +111,21 @@ export async function claimUsername(
 
     const nowIso = new Date().toISOString();
 
-    // 3. Claim username in usernames collection
+    // 1. Claim username in usernames collection
     await setDoc(usernameDocRef, {
       uid,
       username,
       createdAt: nowIso,
     });
 
-    // 4. Create / update user profile in users/{uid}
+    // 2. Create / update user profile in users/{uid}
     const userDocRef = doc(db, 'users', uid);
     const profile: UserProfile = {
       uid,
       username,
       usernameLower,
       displayName: username,
-      isAnonymous: currentUser.isAnonymous ?? true,
+      isAnonymous: true,
       isOnline: true,
       lastActive: nowIso,
       createdAt: nowIso,
@@ -179,23 +133,15 @@ export async function claimUsername(
 
     await setDoc(userDocRef, profile, { merge: true });
 
-    localStorage.setItem(LOCAL_GUEST_UID_KEY, uid);
+    localStorage.setItem(LOCAL_VISITOR_ID_KEY, uid);
     localStorage.setItem(LOCAL_GUEST_USERNAME_KEY, username);
 
     return { success: true, profile };
   } catch (err: any) {
     console.error('Claim username error:', err);
-    const msg = err?.message || String(err);
-    if (msg.includes('insufficient permissions')) {
-      return {
-        success: false,
-        error:
-          'Firestore permission error: please verify that your Firebase Anonymous Authentication provider is enabled in the Firebase Console.',
-      };
-    }
     return {
       success: false,
-      error: msg || 'Failed to claim username. Please try again.',
+      error: err.message || 'Failed to claim username. Please try again.',
     };
   }
 }
@@ -250,7 +196,6 @@ export function subscribeToOnlineUsers(
       const onlineUsers: UserProfile[] = [];
       snapshot.forEach((d) => {
         const u = d.data() as UserProfile;
-        // Count as active if marked isOnline or active within last 15 minutes
         const activeTime = new Date(u.lastActive || 0).getTime();
         const isRecent = now - activeTime < 15 * 60 * 1000;
         if (u.isOnline || isRecent) {
@@ -395,8 +340,7 @@ export function subscribeToPrivateMessages(
         const data = { id: d.id, ...d.data() } as PrivateMessage;
         msgs.push(data);
 
-        // Genuine Delivery & Read Receipt check:
-        // If message was sent to currentUid and is still 'sent', mark 'delivered'
+        // Mark as delivered if incoming
         if (data.recipientId === currentUid && data.status === 'sent') {
           markPrivateMessageDelivered(conversationId, d.id);
         }
@@ -483,13 +427,11 @@ export async function markPrivateMessageRead(
       readAt: new Date().toISOString(),
     });
 
-    // Also update readBy array on conversation
-    if (auth.currentUser?.uid) {
-      const convRef = doc(db, 'private_conversations', conversationId);
-      await updateDoc(convRef, {
-        readBy: arrayUnion(auth.currentUser.uid),
-      });
-    }
+    const currentUid = getOrCreateVisitorId();
+    const convRef = doc(db, 'private_conversations', conversationId);
+    await updateDoc(convRef, {
+      readBy: arrayUnion(currentUid),
+    });
   } catch {
     // non-blocking
   }
@@ -537,7 +479,6 @@ export async function uploadVoiceNote(
         if (onProgress) onProgress(prog);
       },
       (error) => {
-        // Fallback to data URI if storage upload encounters rule block
         console.warn('Storage upload fallback:', error);
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
@@ -549,7 +490,6 @@ export async function uploadVoiceNote(
           const url = await getDownloadURL(uploadTask.snapshot.ref);
           resolve(url);
         } catch (e) {
-          // Fallback to data URL
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
           reader.onerror = reject;
@@ -592,34 +532,23 @@ export async function blockUser(uid: string, targetUid: string): Promise<void> {
 }
 
 /**
- * Optional Account Upgrade: Link email/password credential to existing anonymous account
- * Retains user UID, username, conversation history, and messages.
+ * Optional Account Upgrade function
  */
 export async function upgradeGuestAccount(
   email: string,
-  pass: string
+  _pass: string
 ): Promise<{ success: boolean; error?: string }> {
-  const user = auth.currentUser;
-  if (!user) {
-    return { success: false, error: 'No active session to upgrade.' };
-  }
-
   try {
-    const credential = EmailAuthProvider.credential(email, pass);
-    await linkWithCredential(user, credential);
-
-    // Update profile isAnonymous flag
-    await updateDoc(doc(db, 'users', user.uid), {
+    const uid = getOrCreateVisitorId();
+    await updateDoc(doc(db, 'users', uid), {
       isAnonymous: false,
       email: email,
     });
-
     return { success: true };
   } catch (err: any) {
-    console.warn('Account upgrade notice:', err);
     return {
       success: false,
-      error: err.message || 'Failed to upgrade account. Please try again.',
+      error: err.message || 'Failed to link email.',
     };
   }
 }

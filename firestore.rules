@@ -3,115 +3,76 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default global deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isVerifiedAdmin() {
-      return isSignedIn() &&
+      return request.auth != null &&
         (request.auth.token.email == 'elonmuskspace241@gmail.com' || request.auth.token.email == 'biologyboyboy@gmail.com') &&
         request.auth.token.email_verified == true;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     // Connection test document
     match /test/connection {
-      allow read: if true;
+      allow read, write: if true;
     }
 
-    function isValidUsername(uname) {
-      return uname is string && uname.size() >= 2 && uname.size() <= 30 && uname.matches('^[a-zA-Z0-9_]+$');
-    }
-
-    // 1. Users collection (guest & upgraded profiles)
+    // 1. Users collection (instant guest profiles)
     match /users/{uid} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() &&
-        request.auth.uid == uid &&
-        request.resource.data.uid == uid &&
-        isValidUsername(request.resource.data.username);
-      allow update: if isSignedIn() && (request.auth.uid == uid || isVerifiedAdmin());
+      allow read, write: if true;
       allow delete: if isVerifiedAdmin();
     }
 
-    // 2. Unique username claims to prevent impersonation
+    // 2. Unique username claims
     match /usernames/{usernameLower} {
-      // Allow read so checking callsign availability never hits permissions error
-      allow read: if true;
-      allow create: if isSignedIn() &&
-        request.resource.data.uid == request.auth.uid &&
-        isValidUsername(usernameLower);
-      allow update: if isSignedIn() && resource.data.uid == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow read, write: if true;
     }
 
     // 3. Public Channels (e.g., Elon Musk Lounge)
     match /channels/{channelId}/messages/{messageId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() &&
-        request.resource.data.senderId == request.auth.uid &&
-        request.resource.data.type in ['text', 'image', 'audio'];
-      allow update: if isSignedIn() && (resource.data.senderId == request.auth.uid || isVerifiedAdmin());
-      allow delete: if isSignedIn() && (resource.data.senderId == request.auth.uid || isVerifiedAdmin());
+      allow read, write: if true;
+      allow delete: if isVerifiedAdmin();
     }
 
-    // 4. Private Conversations (1-on-1 between two authorized participants)
+    // 4. Private Conversations
     match /private_conversations/{conversationId} {
-      allow read: if isSignedIn() && (request.auth.uid in resource.data.participants || isVerifiedAdmin());
-      allow create: if isSignedIn() && (request.auth.uid in request.resource.data.participants);
-      allow update: if isSignedIn() && (request.auth.uid in resource.data.participants || isVerifiedAdmin());
+      allow read, write: if true;
       allow delete: if isVerifiedAdmin();
 
       match /messages/{messageId} {
-        allow read: if isSignedIn() &&
-          (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid || isVerifiedAdmin());
-        allow create: if isSignedIn() &&
-          request.resource.data.senderId == request.auth.uid;
-        allow update: if isSignedIn() &&
-          (resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid || isVerifiedAdmin());
+        allow read, write: if true;
         allow delete: if isVerifiedAdmin();
       }
     }
 
-    // 5. Reports for abuse and blocking
+    // 5. Reports for abuse
     match /reports/{reportId} {
-      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
-      allow read, update, delete: if isVerifiedAdmin();
+      allow read, write: if true;
     }
 
     // 6. Direct line with Elon Musk (persistent visitor chat)
     match /conversations/{visitorId} {
-      allow get: if isValidId(visitorId);
-      allow list: if isVerifiedAdmin();
-      allow create, update: if isValidId(visitorId);
-      allow delete: if isValidId(visitorId) && isVerifiedAdmin();
+      allow read, write: if true;
+      allow delete: if isVerifiedAdmin();
 
       match /messages/{messageId} {
-        allow get, list: if isValidId(visitorId);
-        allow create: if isValidId(visitorId);
-        allow update: if isVerifiedAdmin();
-        allow delete: if isValidId(visitorId) && isVerifiedAdmin();
+        allow read, write: if true;
+        allow delete: if isVerifiedAdmin();
       }
     }
 
     // Requests collection
     match /requests/{requestId} {
-      allow read, update, delete: if isVerifiedAdmin();
-      allow create: if isValidId(requestId);
+      allow read, write: if true;
+      allow delete: if isVerifiedAdmin();
     }
 
     // Admin audit logs
     match /admin_audit_logs/{logId} {
-      allow read, create: if isVerifiedAdmin();
-      allow update, delete: if false;
+      allow read, write: if true;
+      allow delete: if false;
+    }
+
+    // Default catch-all
+    match /{document=**} {
+      allow read, write: if true;
     }
   }
 }
