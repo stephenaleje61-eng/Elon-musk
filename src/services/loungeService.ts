@@ -47,32 +47,31 @@ const LOCAL_GUEST_USERNAME_KEY = 'elonverse_guest_username';
  */
 export async function initAnonymousGuest(): Promise<{ uid: string; isNew: boolean }> {
   try {
-    // 1. Ensure local persistence
     try {
       await setPersistence(auth, browserLocalPersistence);
     } catch {
       // fallback
     }
 
-    // 2. Check if already signed in
+    // 1. If auth is already initialized with a user, return it
     if (auth.currentUser) {
+      localStorage.setItem(LOCAL_GUEST_UID_KEY, auth.currentUser.uid);
       return { uid: auth.currentUser.uid, isNew: false };
     }
 
-    // 3. Perform Anonymous Sign-In
+    // 2. Perform Anonymous Sign-In
     const cred = await signInAnonymously(auth);
     const uid = cred.user.uid;
     localStorage.setItem(LOCAL_GUEST_UID_KEY, uid);
     return { uid, isNew: true };
   } catch (err: any) {
-    console.warn('Anonymous sign-in notice:', err?.message || err);
-    // Graceful fallback for environments where Anonymous Auth toggle in console is pending
-    let fallbackUid = localStorage.getItem(LOCAL_GUEST_UID_KEY);
-    if (!fallbackUid) {
-      fallbackUid = 'guest_' + Math.random().toString(36).substring(2, 10);
-      localStorage.setItem(LOCAL_GUEST_UID_KEY, fallbackUid);
+    console.warn('Anonymous sign-in note:', err?.message || err);
+    if (err?.code === 'auth/admin-restricted-operation' || err?.code === 'auth/operation-not-allowed') {
+      throw new Error(
+        'Firebase Anonymous Authentication is currently disabled. Please enable "Anonymous" in Firebase Console > Authentication > Sign-in method.'
+      );
     }
-    return { uid: fallbackUid, isNew: false };
+    throw err;
   }
 }
 
@@ -95,10 +94,12 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 /**
  * Validate and claim a unique username for a guest.
  * Enforces uniqueness via usernames/{usernameLower} collection.
+ * Converts username to lowercase for uniqueness checks.
+ * Validates format: 2-25 characters, letters, numbers, and underscores only.
  */
 export async function claimUsername(
-  uid: string,
-  rawUsername: string
+  rawUsername: string,
+  _providedUid?: string
 ): Promise<{ success: boolean; error?: string; profile?: UserProfile }> {
   const username = rawUsername.trim();
   const usernameRegex = /^[a-zA-Z0-9_]{2,25}$/;
@@ -106,14 +107,41 @@ export async function claimUsername(
   if (!usernameRegex.test(username)) {
     return {
       success: false,
-      error: 'Username must be 2-25 characters and contain only letters, numbers, and underscores.',
+      error: 'Username must be 2–25 characters and contain only letters, numbers, and underscores.',
     };
   }
 
   const usernameLower = username.toLowerCase();
 
+  // 1. Ensure Firebase Auth is active
+  let currentUser = auth.currentUser;
+  if (!currentUser) {
+    try {
+      const cred = await signInAnonymously(auth);
+      currentUser = cred.user;
+    } catch (authErr: any) {
+      if (
+        authErr?.code === 'auth/admin-restricted-operation' ||
+        authErr?.code === 'auth/operation-not-allowed'
+      ) {
+        return {
+          success: false,
+          error:
+            'Firebase Anonymous Authentication must be enabled. Please enable "Anonymous" in Firebase Console > Authentication > Sign-in method.',
+        };
+      }
+      return {
+        success: false,
+        error: `Authentication failed: ${authErr?.message || authErr}`,
+      };
+    }
+  }
+
+  // Use the verified authenticated UID (guaranteed to match request.auth.uid)
+  const uid = currentUser.uid;
+
   try {
-    // Check if username is already claimed
+    // 2. Check if username is already claimed (lowercase uniqueness check)
     const usernameDocRef = doc(db, 'usernames', usernameLower);
     const existingSnap = await getDoc(usernameDocRef);
 
@@ -122,42 +150,52 @@ export async function claimUsername(
       if (data.uid !== uid) {
         return {
           success: false,
-          error: `Username "${username}" is already taken by another voyager. Please pick a different one.`,
+          error: `Username "${username}" is already taken by another voyager. Please choose another username.`,
         };
       }
     }
 
     const nowIso = new Date().toISOString();
 
-    // Reserve username
+    // 3. Claim username in usernames collection
     await setDoc(usernameDocRef, {
       uid,
       username,
       createdAt: nowIso,
     });
 
-    // Create / update user profile
+    // 4. Create / update user profile in users/{uid}
     const userDocRef = doc(db, 'users', uid);
     const profile: UserProfile = {
       uid,
       username,
       usernameLower,
       displayName: username,
-      isAnonymous: auth.currentUser?.isAnonymous ?? true,
+      isAnonymous: currentUser.isAnonymous ?? true,
       isOnline: true,
       lastActive: nowIso,
       createdAt: nowIso,
     };
 
     await setDoc(userDocRef, profile, { merge: true });
+
+    localStorage.setItem(LOCAL_GUEST_UID_KEY, uid);
     localStorage.setItem(LOCAL_GUEST_USERNAME_KEY, username);
 
     return { success: true, profile };
   } catch (err: any) {
-    console.warn('Claim username error:', err);
+    console.error('Claim username error:', err);
+    const msg = err?.message || String(err);
+    if (msg.includes('insufficient permissions')) {
+      return {
+        success: false,
+        error:
+          'Firestore permission error: please verify that your Firebase Anonymous Authentication provider is enabled in the Firebase Console.',
+      };
+    }
     return {
       success: false,
-      error: err.message || 'Failed to claim username. Please try again.',
+      error: msg || 'Failed to claim username. Please try again.',
     };
   }
 }

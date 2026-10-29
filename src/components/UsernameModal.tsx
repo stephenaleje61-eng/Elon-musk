@@ -9,7 +9,7 @@ import { claimUsername } from '../services/loungeService';
 import { UserProfile } from '../types';
 
 interface UsernameModalProps {
-  uid: string;
+  uid?: string;
   isOpen: boolean;
   onSuccess: (profile: UserProfile) => void;
 }
@@ -37,7 +37,7 @@ export const UsernameModal: React.FC<UsernameModalProps> = ({
       setIsLoading(true);
       setErrorMessage(null);
 
-      const res = await claimUsername(uid, clean);
+      const res = await claimUsername(clean, uid);
       if (!res.success || !res.profile) {
         setErrorMessage(res.error || 'Could not claim username. Try another.');
         return;

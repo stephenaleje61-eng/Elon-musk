@@ -27,7 +27,7 @@ import {
   setOnlinePresence,
 } from '../services/loungeService';
 import { UserProfile } from '../types';
-import { ADMIN_EMAIL } from '../lib/firebase';
+import { ADMIN_EMAIL, auth } from '../lib/firebase';
 
 interface HomePageProps {
   navigate: (path: string) => void;
@@ -52,20 +52,29 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
     async function checkExistingSession() {
       if (hasEnteredChat) {
         setIsInitializing(true);
-        const { uid } = await initAnonymousGuest();
-        if (!active) return;
-        setGuestUid(uid);
+        try {
+          const res = await initAnonymousGuest().catch(() => null);
+          const currentUid = res?.uid || auth.currentUser?.uid;
+          if (!active) return;
 
-        const profile = await getUserProfile(uid);
-        if (!active) return;
-
-        if (profile) {
-          setGuestProfile(profile);
-          setOnlinePresence(uid, true);
-        } else {
-          setShowUsernameModal(true);
+          if (currentUid) {
+            setGuestUid(currentUid);
+            const profile = await getUserProfile(currentUid);
+            if (!active) return;
+            if (profile) {
+              setGuestProfile(profile);
+              setOnlinePresence(currentUid, true);
+            } else {
+              setShowUsernameModal(true);
+            }
+          } else {
+            setShowUsernameModal(true);
+          }
+        } catch (e) {
+          console.warn('Session check note:', e);
+        } finally {
+          if (active) setIsInitializing(false);
         }
-        setIsInitializing(false);
       }
     }
 
@@ -83,20 +92,26 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
   const handleEnterChat = async () => {
     try {
       setIsInitializing(true);
-      const { uid } = await initAnonymousGuest();
-      setGuestUid(uid);
-      localStorage.setItem('elonverse_has_entered_chat', 'true');
-      setHasEnteredChat(true);
+      const res = await initAnonymousGuest().catch((err) => {
+        console.warn('Init guest note:', err);
+        return null;
+      });
 
-      const profile = await getUserProfile(uid);
-      if (profile) {
-        setGuestProfile(profile);
-        setOnlinePresence(uid, true);
-      } else {
-        setShowUsernameModal(true);
+      const currentUid = res?.uid || auth.currentUser?.uid;
+      if (currentUid) {
+        setGuestUid(currentUid);
+        const profile = await getUserProfile(currentUid);
+        if (profile) {
+          setGuestProfile(profile);
+          setOnlinePresence(currentUid, true);
+          setHasEnteredChat(true);
+          localStorage.setItem('elonverse_has_entered_chat', 'true');
+          return;
+        }
       }
-    } catch (err) {
-      console.warn('Enter chat error:', err);
+
+      // If no profile, show UsernameModal for first-time callsign selection
+      setShowUsernameModal(true);
     } finally {
       setIsInitializing(false);
     }
@@ -104,6 +119,9 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
 
   const handleUsernameSuccess = (profile: UserProfile) => {
     setGuestProfile(profile);
+    setGuestUid(profile.uid);
+    setHasEnteredChat(true);
+    localStorage.setItem('elonverse_has_entered_chat', 'true');
     setShowUsernameModal(false);
     setOnlinePresence(profile.uid, true);
   };
@@ -305,13 +323,11 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
       </main>
 
       {/* Username Claim Modal */}
-      {guestUid && (
-        <UsernameModal
-          uid={guestUid}
-          isOpen={showUsernameModal}
-          onSuccess={handleUsernameSuccess}
-        />
-      )}
+      <UsernameModal
+        uid={guestUid || undefined}
+        isOpen={showUsernameModal}
+        onSuccess={handleUsernameSuccess}
+      />
 
       {/* Footer */}
       <footer className="border-t border-zinc-900 bg-black py-4">

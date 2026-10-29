@@ -22,26 +22,34 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    // Connection test document
+    match /test/connection {
+      allow read: if true;
+    }
+
+    function isValidUsername(uname) {
+      return uname is string && uname.size() >= 2 && uname.size() <= 30 && uname.matches('^[a-zA-Z0-9_]+$');
+    }
+
     // 1. Users collection (guest & upgraded profiles)
     match /users/{uid} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == uid &&
-        request.resource.data.keys().hasAll(['uid', 'username', 'usernameLower', 'createdAt']) &&
+      allow create: if isSignedIn() &&
+        request.auth.uid == uid &&
         request.resource.data.uid == uid &&
-        request.resource.data.username is string &&
-        request.resource.data.username.size() >= 2 &&
-        request.resource.data.username.size() <= 30;
+        isValidUsername(request.resource.data.username);
       allow update: if isSignedIn() && (request.auth.uid == uid || isVerifiedAdmin());
       allow delete: if isVerifiedAdmin();
     }
 
     // 2. Unique username claims to prevent impersonation
     match /usernames/{usernameLower} {
-      allow read: if isSignedIn();
+      // Allow read so checking callsign availability never hits permissions error
+      allow read: if true;
       allow create: if isSignedIn() &&
         request.resource.data.uid == request.auth.uid &&
-        !exists(/databases/$(database)/documents/usernames/$(usernameLower));
-      allow update: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+        isValidUsername(usernameLower);
+      allow update: if isSignedIn() && resource.data.uid == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
@@ -49,10 +57,9 @@ service cloud.firestore {
     match /channels/{channelId}/messages/{messageId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() &&
-        request.resource.data.keys().hasAll(['channelId', 'senderId', 'senderUsername', 'type', 'timestamp']) &&
         request.resource.data.senderId == request.auth.uid &&
         request.resource.data.type in ['text', 'image', 'audio'];
-      allow update: if isSignedIn() && (request.resource.data.senderId == request.auth.uid || isVerifiedAdmin());
+      allow update: if isSignedIn() && (resource.data.senderId == request.auth.uid || isVerifiedAdmin());
       allow delete: if isSignedIn() && (resource.data.senderId == request.auth.uid || isVerifiedAdmin());
     }
 
@@ -65,10 +72,9 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow read: if isSignedIn() &&
-          (get(/databases/$(database)/documents/private_conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]) || isVerifiedAdmin());
+          (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid || isVerifiedAdmin());
         allow create: if isSignedIn() &&
-          request.resource.data.senderId == request.auth.uid &&
-          get(/databases/$(database)/documents/private_conversations/$(conversationId)).data.participants.hasAny([request.auth.uid]);
+          request.resource.data.senderId == request.auth.uid;
         allow update: if isSignedIn() &&
           (resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid || isVerifiedAdmin());
         allow delete: if isVerifiedAdmin();
@@ -81,7 +87,7 @@ service cloud.firestore {
       allow read, update, delete: if isVerifiedAdmin();
     }
 
-    // 6. Existing visitor conversations and direct Elon Line preservation
+    // 6. Direct line with Elon Musk (persistent visitor chat)
     match /conversations/{visitorId} {
       allow get: if isValidId(visitorId);
       allow list: if isVerifiedAdmin();
