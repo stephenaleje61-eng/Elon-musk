@@ -1,0 +1,6 @@
+{
+  "name": "ELONVERSE",
+  "description": "ELONVERSE - Space-inspired universe portal with real-time persistent chat, rich media image sharing, and secure administrator controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

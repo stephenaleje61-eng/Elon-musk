@@ -1,0 +1,116 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Guest or upgraded user profile with UID authorization",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 30 },
+        "usernameLower": { "type": "string", "maxLength": 30 },
+        "displayName": { "type": "string", "maxLength": 50 },
+        "avatarUrl": { "type": "string", "maxLength": 2048 },
+        "bio": { "type": "string", "maxLength": 300 },
+        "isAnonymous": { "type": "boolean" },
+        "isOnline": { "type": "boolean" },
+        "lastActive": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "username", "usernameLower", "createdAt"]
+    },
+    "UsernameRecord": {
+      "title": "UsernameRecord",
+      "description": "Unique username claim mapping lowercase username to UID",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 30 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "username"]
+    },
+    "LoungeMessage": {
+      "title": "LoungeMessage",
+      "description": "Message sent in Elon Musk Lounge public channel",
+      "type": "object",
+      "properties": {
+        "channelId": { "type": "string", "maxLength": 64 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderUsername": { "type": "string", "maxLength": 30 },
+        "senderAvatar": { "type": "string", "maxLength": 2048 },
+        "type": { "type": "string", "enum": ["text", "image", "audio"] },
+        "text": { "type": "string", "maxLength": 2000 },
+        "url": { "type": "string", "maxLength": 2048 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["channelId", "senderId", "senderUsername", "type", "timestamp"]
+    },
+    "PrivateConversation": {
+      "title": "PrivateConversation",
+      "description": "Encrypted 1-on-1 private conversation between two authenticated users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 256 },
+        "participants": { "type": "array" },
+        "lastMessage": { "type": "string", "maxLength": 500 },
+        "lastSenderId": { "type": "string", "maxLength": 128 },
+        "lastTimestamp": { "type": "string" }
+      },
+      "required": ["id", "participants"]
+    },
+    "PrivateMessage": {
+      "title": "PrivateMessage",
+      "description": "Individual 1-on-1 private message",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string", "maxLength": 256 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "recipientId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["text", "image", "audio"] },
+        "text": { "type": "string", "maxLength": 2000 },
+        "url": { "type": "string", "maxLength": 2048 },
+        "status": { "type": "string", "enum": ["sent", "delivered", "read"] },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["conversationId", "senderId", "recipientId", "type", "timestamp"]
+    },
+    "UserReport": {
+      "title": "UserReport",
+      "description": "Abuse and moderation report filed by a user",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "reportedUserId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 500 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["reporterId", "reportedUserId", "reason", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "Real guest and upgraded user profiles"
+    },
+    "/usernames/{usernameLower}": {
+      "schema": "UsernameRecord",
+      "description": "Unique username claims preventing impersonation"
+    },
+    "/channels/{channelId}/messages/{messageId}": {
+      "schema": "LoungeMessage",
+      "description": "Public lounge messages"
+    },
+    "/private_conversations/{conversationId}": {
+      "schema": "PrivateConversation",
+      "description": "Private 1-on-1 conversations between participants"
+    },
+    "/private_conversations/{conversationId}/messages/{messageId}": {
+      "schema": "PrivateMessage",
+      "description": "Messages inside private conversations"
+    },
+    "/reports/{reportId}": {
+      "schema": "UserReport",
+      "description": "Reports for moderation"
+    }
+  }
+}
